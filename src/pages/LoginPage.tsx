@@ -1,0 +1,2 @@
+import { CalendarDays, ShieldCheck } from 'lucide-react';
+export function LoginPage() { return <main className="login-page"><div className="login-card"><div className="brand-mark large"><CalendarDays size={27} /></div><h1>让传统日期，<span>自然发生</span></h1><p>用 aCalendar 编排农历生日、节气和那些重要的日子。</p><a className="button primary login-button" href="/api/auth/sso/login">使用 aSSO 登录</a><div className="login-note"><ShieldCheck size={15} /> 由统一身份认证保护</div></div></main>; }

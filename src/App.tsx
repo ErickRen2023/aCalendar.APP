@@ -1,0 +1,49 @@
+import { useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { addMonths, endOfMonth, format, startOfMonth, subMonths } from 'date-fns';
+import { ChevronLeft, ChevronRight, Download, Grid2X2, List, Plus, Sparkles } from 'lucide-react';
+import { api } from './api/client';
+import { CalendarSidebar } from './components/CalendarSidebar';
+import { CalendarModal } from './components/CalendarModal';
+import { EventModal } from './components/EventModal';
+import { MonthView } from './components/MonthView';
+import { CallbackPage } from './pages/CallbackPage';
+import { LoginPage } from './pages/LoginPage';
+import { useUiStore } from './store';
+import { COLORS, type CalendarItem, type Occurrence } from './types';
+
+function Protected({ children }: { children: React.ReactNode }) { return localStorage.getItem('acalendar_token') ? <>{children}</> : <Navigate to="/login" replace />; }
+
+function AppShell() {
+  const queryClient = useQueryClient(); const navigate = useNavigate(); const [collapsed, setCollapsed] = useState(false); const [newDate, setNewDate] = useState<Date>(); const [toast, setToast] = useState(''); const [calendarModal, setCalendarModal] = useState<{ mode: 'create' | 'rename'; calendar?: CalendarItem } | null>(null);
+  const { selectedCalendarId, setSelectedCalendarId, viewMode, setViewMode, cursor, setCursor, editingEventId, modalOpen, openEvent, closeEvent } = useUiStore();
+  const calendarsQuery = useQuery({ queryKey: ['calendars'], queryFn: api.calendars });
+  const calendars = calendarsQuery.data || [];
+  useEffect(() => { if (!selectedCalendarId && calendars[0]) setSelectedCalendarId(calendars[0].id); }, [calendars, selectedCalendarId, setSelectedCalendarId]);
+  const rangeFrom = format(startOfMonth(cursor), 'yyyy-MM-dd'); const rangeTo = format(endOfMonth(cursor), 'yyyy-MM-dd');
+  const activeCalendar = calendars.find(calendar => calendar.id === selectedCalendarId);
+  const calendarIds = calendars.map(calendar => calendar.id);
+  const calendarDataQuery = useQuery({ queryKey: ['calendar-data', calendarIds, rangeFrom, rangeTo], queryFn: async () => Promise.all(calendars.map(async calendar => { const [events, occurrences] = await Promise.all([api.events(calendar.id), api.occurrences(calendar.id, rangeFrom, rangeTo)]); return { calendar, events, occurrences }; })), enabled: calendarIds.length > 0 });
+  const allEvents = calendarDataQuery.data?.flatMap(item => item.events) || [];
+  const events = allEvents;
+  const occurrences = calendarDataQuery.data?.flatMap(item => item.occurrences) || [];
+  const editEvent = allEvents.find(event => event.id === editingEventId);
+  const deleteCalendar = useMutation({ mutationFn: api.deleteCalendar, onSuccess: (_, id) => { if (selectedCalendarId === id) setSelectedCalendarId(null); queryClient.invalidateQueries({ queryKey: ['calendars'] }); queryClient.invalidateQueries({ queryKey: ['calendar-data'] }); showToast('日历已删除'); } });
+  const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2400); };
+  const createCalendar = () => setCalendarModal({ mode: 'create' });
+  const renameCalendar = (calendar: CalendarItem) => setCalendarModal({ mode: 'rename', calendar });
+  const saveCalendar = async (data: { name: string; color: string }) => { if (calendarModal?.mode === 'rename' && calendarModal.calendar) { await api.updateCalendar(calendarModal.calendar.id, data); await queryClient.invalidateQueries({ queryKey: ['calendars'] }); await queryClient.invalidateQueries({ queryKey: ['calendar-data'] }); showToast('日历已更新'); } else { const calendar = await api.createCalendar(data); await queryClient.invalidateQueries({ queryKey: ['calendars'] }); setSelectedCalendarId(calendar.id); showToast('日历已创建'); } setCalendarModal(null); };
+  const openNew = (date?: Date) => { if (!activeCalendar) { setCalendarModal({ mode: 'create' }); return; } setNewDate(date || cursor); openEvent(); };
+  const exportCalendars = async () => { if (!calendars.length) return; try { await api.exportMerge(calendarIds); showToast('日历已导出'); } catch (error) { showToast(error instanceof Error ? error.message : '导出失败'); } };
+  const logout = () => { localStorage.removeItem('acalendar_token'); localStorage.removeItem('acalendar_profile'); navigate('/login'); };
+  return <div className="app-shell"><CalendarSidebar calendars={calendars} selected={selectedCalendarId} onSelect={setSelectedCalendarId} onCreate={createCalendar} onRename={renameCalendar} onDelete={(calendar) => { if (window.confirm(`确定删除「${calendar.name}」？`)) deleteCalendar.mutate(calendar.id); }} collapsed={collapsed} onToggle={() => setCollapsed(value => !value)} /><main className="main-area"><header className="topbar"><div><span className="eyebrow">{activeCalendar ? '多日历叠加' : '欢迎使用'}</span><h1>{activeCalendar?.name || '月历'}</h1></div><div className="top-actions"><button className="button export-button" onClick={exportCalendars} disabled={!calendars.length}><Download size={17} /> 导出日历</button><button className="button primary" onClick={() => openNew()} disabled={!activeCalendar}><Plus size={17} /> 新建事件</button><button className="avatar-button" onClick={logout}>{(JSON.parse(localStorage.getItem('acalendar_profile') || '{}').username || 'a').slice(0, 1).toUpperCase()}<span className="online-dot" /></button></div></header>{toast && <div className="toast">{toast}</div>}<div className="toolbar"><div className="date-nav"><button className="icon-button" onClick={() => setCursor(subMonths(cursor, 1))}><ChevronLeft size={18} /></button><button className="icon-button" onClick={() => setCursor(new Date())}>今天</button><button className="icon-button" onClick={() => setCursor(addMonths(cursor, 1))}><ChevronRight size={18} /></button><strong>{format(cursor, 'yyyy年 M月')}</strong></div><div className="view-actions"><button className={`view-button ${viewMode === 'month' ? 'active' : ''}`} onClick={() => setViewMode('month')}><Grid2X2 size={15} /> 月</button><button className={`view-button ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')}><List size={15} /> 列表</button><button className={`view-button ${viewMode === 'year' ? 'active' : ''}`} onClick={() => setViewMode('year')}><Sparkles size={15} /> 年</button></div></div><section className="calendar-panel">{viewMode === 'month' && <MonthView cursor={cursor} occurrences={occurrences} onNew={openNew} onEdit={openEvent} />}{viewMode === 'list' && <ListView events={occurrences} onEdit={openEvent} />}{viewMode === 'year' && <YearView cursor={cursor} onSelect={(date) => { setCursor(date); setViewMode('month'); }} />}</section><div className="calendar-footnote">{calendars.length ? <><span>已叠加 {calendars.length} 个日历 · {events.length} 个事件</span><div className="calendar-legend">{calendars.map(calendar => <span className="calendar-legend-item" key={calendar.id}><i className="legend-dot" style={{ background: calendar.color }} />{calendar.name}</span>)}</div></> : <span className="calendar-empty-hint">还没有日历，双击任意日期或点击左侧「+」先创建一个日历</span>}<span className="footnote-tip">双击日期可以快速添加事件</span></div></main>{modalOpen && activeCalendar && <EventModal calendarId={editEvent?.calendar_id || activeCalendar.id} event={editEvent} defaultDate={newDate} onClose={closeEvent} onSaved={() => { closeEvent(); queryClient.invalidateQueries({ queryKey: ['calendar-data'] }); queryClient.invalidateQueries({ queryKey: ['calendars'] }); showToast('事件已保存'); }} />}{calendarModal && <CalendarModal mode={calendarModal.mode} calendar={calendarModal.calendar} onClose={() => setCalendarModal(null)} onSave={saveCalendar} />}</div>;
+}
+
+function EmptyDashboard({ onCreate }: { onCreate: () => void }) { return <div className="empty-dashboard"><div className="empty-illustration"><Sparkles size={31} /></div><h2>从一个日历开始</h2><p>创建一个日历，把农历生日、纪念日和重要安排都放在一起。</p><button className="button primary" onClick={onCreate}><Plus size={17} /> 创建日历</button></div>; }
+
+function ListView({ events, onEdit }: { events: Occurrence[]; onEdit: (id: number) => void }) { const sorted = [...events].sort((a, b) => a.start_at.localeCompare(b.start_at)); return <div className="list-view">{sorted.length === 0 ? <div className="empty-state">这个月还没有事件，双击日期开始添加。</div> : sorted.map(event => <button className="list-event" key={`${event.event_id}-${event.start_at}`} onClick={() => onEdit(event.event_id)}><span className="list-date"><b>{format(new Date(event.start_at), 'd')}</b><small>{format(new Date(event.start_at), 'EEE')}</small></span><span className="list-line" style={{ background: event.color }} /><span className="list-copy"><b>{event.title}</b><small>{format(new Date(event.start_at), 'yyyy年M月d日')} · {event.is_all_day ? '全天' : format(new Date(event.start_at), 'HH:mm')}{event.is_leap ? ' · 闰月' : ''}</small></span><span className="list-arrow">›</span></button>)}</div>; }
+
+function YearView({ cursor, onSelect }: { cursor: Date; onSelect: (date: Date) => void }) { return <div className="year-view">{Array.from({ length: 12 }, (_, index) => { const month = new Date(cursor.getFullYear(), index, 1); return <button key={index} className="year-month" onClick={() => onSelect(month)}><b>{index + 1}月</b><div className="mini-days">{Array.from({ length: new Date(cursor.getFullYear(), index + 1, 0).getDate() }, (_, day) => <i key={day} className={(day + 1 === new Date().getDate() && index === new Date().getMonth() && cursor.getFullYear() === new Date().getFullYear()) ? 'today-mini' : ''}>{day + 1}</i>)}</div></button>; })}</div>; }
+
+export default function App() { return <Routes><Route path="/login" element={<LoginPage />} /><Route path="/auth/sso/callback" element={<CallbackPage />} /><Route path="*" element={<Protected><AppShell /></Protected>} /></Routes>; }
