@@ -96,13 +96,10 @@ export function EventModal({ calendarId, event, defaultDate, onClose, onSaved }:
 
   const selectMode = (mode: 'none' | 'solar' | 'lunar') => {
     if (mode === 'lunar' && form.mode !== 'lunar') {
-      const baseDate = event ? new Date(`${form.start}T00:00:00`) : new Date();
-      const baseDateText = format(baseDate, 'yyyy-MM-dd');
-      const lunar = Lunar.fromDate(new Date(`${baseDateText}T00:00:00`));
+      const lunar = Lunar.fromDate(new Date(`${form.start}T00:00:00`));
       setForm(current => ({
         ...current,
         mode,
-        ...(event ? {} : { start: baseDateText, end: baseDateText }),
         lunarMonth: Math.abs(lunar.getMonth()),
         lunarDay: lunar.getDay(),
       }));
